@@ -1,0 +1,23 @@
+service: serverless-workshop
+frameworkVersion: '2'
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  region: eu-west-2
+  stage: dev
+  tags: 
+    project-name: serverless-workshop 
+  environment:
+    MY_VAR_1: 'variable1'
+
+
+functions:
+  sync-function:
+    handler: functions/sync-function.handler
+  async-function:
+    handler: functions/async-function.handler
+    events:
+      - schedule: rate(1 minute)
+    environment:
+      MY_VAR_2: variable2
