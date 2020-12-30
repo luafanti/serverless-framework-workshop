@@ -8,106 +8,140 @@ plugins:
 custom:
   tableName: books-${self:provider.stage}
   tableKey: bookId
+  importBucketName: books-dump-landing-zone-${self:provider.stage}
+  successTopicName: SuccessTopic-${self:provider.stage}
+  failTopicName: FailTopic-${self:provider.stage}
 
 provider:
   name: aws
   runtime: nodejs12.x
   region: eu-west-2
   stage: ${opt:stage, 'dev'}
+  tracing:
+    apiGateway: true
+    lambda: true
   tags: 
     project-name: serverless-workshop 
   environment:
     TABLE_NAME: ${self:custom.tableName}
-    NODE_PATH: "./:/opt/node_modules"
 
 functions:
-  get-book:
-    handler: functions/get-book.handler
+  importer:
+    handler: functions/importer.handler
+    # maximumRetryAttempts: 1
+    destinations:
+      onSuccess: arn:aws:sns:eu-west-2:673177665601:${self:custom.successTopicName}
+      onFailure: arn:aws:sns:eu-west-2:673177665601:${self:custom.successTopicName}
     events:
-      - httpApi:
-          method: GET
-          path: /books
+      - s3:
+          bucket: ${self:custom.importBucketName}
+          event: s3:ObjectCreated:*
     package:
       include:
-        - functions/get-book.js
+        - functions/importer.js
     iamRoleStatements:
       - Effect: "Allow"
         Action:
-          - dynamodb:Scan
-        Resource:
-          Fn::GetAtt:
-            - BooksDynamoDB
-            - Arn
-    layers:
-      - ${cf:layers-${self:provider.stage}.ExpressLayerArn}
-
-  add-book:
-    handler: functions/add-book.handler
-    events:
-      - httpApi:
-          method: POST
-          path: /books
-    package:
-      include:
-        - functions/add-book.js
-    iamRoleStatements:
+          - s3:GetObject
+        Resource: { "Fn::Join": ["", ["arn:aws:s3:::", "${self:custom.importBucketName}", "/*" ] ] }
       - Effect: "Allow"
         Action:
           - dynamodb:PutItem
-        Resource:
-          Fn::GetAtt:
-            - BooksDynamoDB
-            - Arn
-    layers:
-      - ${cf:layers-${self:provider.stage}.ExpressLayerArn}
-      - ${cf:layers-${self:provider.stage}.MomentLayerArn}
-
-  update-book:
-    handler: functions/update-book.handler
-    events:
-      - httpApi:
-          method: PUT
-          path: /books/{params}
-    package:
-      include:
-        - functions/update-book.js
-    iamRoleStatements:
-      - Effect: "Allow"
-        Action:
           - dynamodb:UpdateItem
         Resource:
           Fn::GetAtt:
             - BooksDynamoDB
             - Arn
-    layers:
-      - ${cf:layers-${self:provider.stage}.ExpressLayerArn}
-
-  delete-book:
-    handler: functions/delete-book.handler
+      - Effect: "Allow"
+        Action:
+          - sns:Publish
+        Resource:
+          - { "Fn::Join" : ["", ["arn:aws:sns:${self:provider.region}:", { "Ref" : "AWS::AccountId" }, ":${self:custom.successTopicName}" ] ]  }
+          - { "Fn::Join" : ["", ["arn:aws:sns:${self:provider.region}:", { "Ref" : "AWS::AccountId" }, ":${self:custom.failTopicName}" ] ]  }
+      - Effect: Allow
+        Action:
+          - xray:PutTraceSegments
+          - xray:PutTelemetryRecords
+        Resource: "*"
+  books:
+    handler: functions/books.handler
     events:
       - httpApi:
-          method: DELETE
+          method: "*"
+          path: /books
+      - httpApi:
+          method: "*"
           path: /books/{params}
     package:
       include:
-        - functions/delete-book.js
+        - functions/books.js
+    environment:
+      NODE_PATH: "./:/opt/node_modules"
+    iamRoleStatementsInherit: true
     iamRoleStatements:
       - Effect: "Allow"
         Action:
+          - dynamodb:DescribeTable
+          - dynamodb:Query
+          - dynamodb:Scan
+          - dynamodb:GetItem
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
           - dynamodb:DeleteItem
         Resource:
           Fn::GetAtt:
             - BooksDynamoDB
             - Arn
+      - Effect: Allow
+        Action:
+          - xray:PutTraceSegments
+          - xray:PutTelemetryRecords
+        Resource: "*"
     layers:
       - ${cf:layers-${self:provider.stage}.ExpressLayerArn}
+      - ${cf:layers-${self:provider.stage}.MomentLayerArn}
+  # books-v2:
+  #   handler: functions/books.handler
+  #   events:
+  #     - http:
+  #         method: ANY
+  #         path: /books
+  #     - http:
+  #         method: ANY
+  #         path: /books/{params}
+  #   package:
+  #     include:
+  #       - functions/books.js
+  #   iamRoleStatements:
+  #     - Effect: "Allow"
+  #       Action:
+  #         - dynamodb:DescribeTable
+  #         - dynamodb:Query
+  #         - dynamodb:Scan
+  #         - dynamodb:GetItem
+  #         - dynamodb:PutItem
+  #         - dynamodb:UpdateItem
+  #         - dynamodb:DeleteItem
+  #       Resource:
+  #         Fn::GetAtt:
+  #           - BooksDynamoDB
+  #           - Arn
+  #   layers:
+  #     - ${cf:layers-${self:provider.stage}.ExpressLayerArn}
+  #     - ${cf:layers-${self:provider.stage}.MomentLayerArn}
 
 resources:
   - ${file(resources/dynamoDb.yml)}
+  - ${file(resources/sns.yml)}
+
 
 package:
   individually: true
   exclude:
     - "functions/*"
     - "resources/*"
+    - "events/*"
     - "layers/**"
+    - "package.json"
+    - "pacakge-lock.json"
+    - "README.md"

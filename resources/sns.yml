@@ -1,0 +1,15 @@
+Resources:
+  BookImportSuccessTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: ${self:custom.successTopicName}
+      Subscription:
+        - Protocol: Email
+          Endpoint: luafanti@gmail.com
+  BookImportFailTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: ${self:custom.failTopicName}
+      Subscription:
+        - Protocol: Email
+          Endpoint: luafanti@gmail.com
